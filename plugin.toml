@@ -37,3 +37,15 @@ ro   = true
 
 [service.env]
 DOMAIN = { setting = "domain", default = "home.local" }
+
+[[proof]]
+id      = "caddy.redirects-plain-http"
+title   = "A household name asked for over plain HTTP is sent to HTTPS"
+fixture = "recordings/caddy/plain-http-is-redirected.json"
+why     = """
+Caddy answers every household name it serves with a permanent redirect to HTTPS at
+the same name and no port, which is 443, the port lemonfiber publishes its 8443 on.
+A plain-HTTP answer of anything else would mean a name served without TLS.
+"""
+request = { method = "GET", path = "/" }
+expect  = { status = 308 }
