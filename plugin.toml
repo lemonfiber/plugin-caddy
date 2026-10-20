@@ -25,15 +25,20 @@ memory_mib  = 50
 reaches     = ""
 asks_for    = "Nothing. It answers names on this machine and forwards to the services beside it; no certificate is fetched, because nothing here is published to the internet."
 replaces    = "caddy"
+config_path = "/etc/caddy"
+config_ro   = true
 
 [[service.publish]]
 port    = 443
 listens = 8443
 
 [[service.mount]]
-from = "Caddyfile"
-to   = "/etc/caddy/Caddyfile"
-ro   = true
+from = "data"
+to   = "/data"
+
+[[service.mount]]
+from = "config"
+to   = "/config"
 
 [service.env]
 DOMAIN = { setting = "domain", default = "home.local" }
@@ -54,7 +59,7 @@ expect  = { status = 308 }
 id      = "caddy.version"
 title   = "The image's own Caddy says which release it is"
 run     = { args = ["caddy", "version"] }
-expect  = { exit = 0, stdout_starts_with = "v2.11.6 " }
+expect  = { exit = 0, stdout_starts_with = "v2.11.7 " }
 fixture = "recordings/caddy/version.json"
 why     = """
 Every other proof here is a status the configuration chose, which a port proxy
