@@ -25,6 +25,7 @@ memory_mib  = 50
 reaches     = ""
 asks_for    = "Nothing. It answers names on this machine and forwards to the services beside it; no certificate is fetched, because nothing here is published to the internet."
 replaces    = "caddy"
+user_mode   = "uid"
 config_path = "/etc/caddy"
 config_ro   = true
 
