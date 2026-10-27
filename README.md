@@ -32,6 +32,8 @@ reads them back to say what Caddy serves.
 | `plugin.toml` | The part's manifest |
 | `config/caddy/` | The files Caddy starts with, written into its configuration directory |
 | `src/` | The adapter |
+| `conformance/` | One recording per case of `proxy.front@1`, answered by the adapter in front of the pinned Caddy |
+| `recordings/` | The recordings of the manifest's proofs |
 | `Dockerfile` | The adapter's image |
 | `targets.toml` | The lemonfiber its checks run against, and the core the adapter is built on |
 | `proofs.json` | What those checks said, committed |
@@ -41,7 +43,8 @@ reads them back to say what Caddy serves.
 The plugin verdict is one job of spec's
 [`first-party-plugin`](https://github.com/lemonfiber/spec/blob/main/.github/workflows/first-party-plugin.yml)
 workflow: the manifest as the lemonfiber `targets.toml` names reads it, every
-claim against its recording, and every pinned digest. The adapter is held to its
+proof and every case of the adapter's contract against its recording, and every
+pinned digest. The adapter is held to its
 format, its lints, its tests, full line coverage and its dependency policy, and
 its image runs as lemonfiber runs it. This repository holds no Python of its own.
 `just ci` runs the gates that need nothing but this tree.

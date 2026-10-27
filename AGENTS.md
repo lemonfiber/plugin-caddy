@@ -21,11 +21,19 @@ says how the catalogue pins this repository and how lemonfiber carries it.
 
 - **The plugin id is the service's id** (`ARCH-R266`). The container, the
   configuration directory, the settings and the journal keep their names.
-- **One service, speaking no contract**, while the bundle assembles it. It
+- **Two services: `caddy` and `caddy-adapter`.** `caddy` speaks no contract and
   declares `replaces` naming its own id, which is how it takes the id, the port
-  and the hostname the bundle reserves for it (`ARCH-R222`).
-- **Its claims' recordings sit under `recordings/caddy/`**, and its starting
-  files, where it has any, under `config/caddy/` (`ARCH-R271`).
+  and the hostname the bundle reserves for it (`ARCH-R222`). `caddy-adapter`
+  fronts it, speaks `proxy.front@1`, provides `proxy.front` and shares Caddy's
+  configuration directory at `/caddy` (`ARCH-R339`).
+- **Its proofs' recordings sit under `recordings/caddy/`**, and its starting
+  files under `config/caddy/` (`ARCH-R271`).
+- **`conformance/` holds one recording per case of `proxy.front@1`**, written
+  by `lemonfiber plugin record .` at the commit `targets.toml` names, the
+  adapter in front of Caddy at the digest `plugin.toml` pins; CI takes every
+  recording again with the adapter built from this tree. Re-record whenever the
+  adapter's answers or Caddy's digest change. `tests/conformance.rs` reads
+  every recording with the core's own client.
 - **Every service declares `reaches` and `asks_for`** (`ARCH-R270`).
 - **No Python here.** The reader is spec's `first-party-plugin` workflow's.
 - **No `unwrap`, `expect`, `panic` or indexing** outside tests. The lints in
@@ -37,7 +45,8 @@ says how the catalogue pins this repository and how lemonfiber carries it.
 - **The core's crates move with the train.** The `rev` in `Cargo.toml` is the
   core commit `targets.toml` names, the same for every `lemonfiber-*` crate.
 - **Moving Caddy's digest** means moving `RELEASE` and `DIGEST` in
-  `src/adapter.rs` with it.
+  `src/adapter.rs` with it; `tests/manifest.rs` fails until they name the
+  image the manifest's `caddy` runs.
 - **The image is built in `lemonfiber-caddy`** (`OPS-R93`). Its `Dockerfile` builds
   it from its upstream's, and it runs under the posture this manifest's main
   declares (`ARCH-R250`), with the starting files under `config/caddy/`. Its pin

@@ -30,7 +30,11 @@
 # certificate-expiry notices from the CA, add `email you@example.com` to the
 # block below.
 
+# The adapter in front of Caddy reaches its admin API at this socket alone, in the
+# configuration directory the two share, readable and writable by their user only.
+
 {
+	admin unix//etc/caddy/admin.sock|0600
 	http_port 8080
 	https_port 8443
 }

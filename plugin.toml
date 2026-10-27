@@ -25,10 +25,8 @@ memory_mib  = 50
 reaches     = ""
 asks_for    = "Nothing. It answers names on this machine and forwards to the services beside it; no certificate is fetched, because nothing here is published to the internet."
 replaces    = "caddy"
-provides    = ["proxy.front"]
 user_mode   = "uid"
 config_path = "/etc/caddy"
-config_ro   = true
 
 [[service.publish]]
 port    = 443
@@ -45,8 +43,26 @@ to   = "/config"
 [service.env]
 DOMAIN = { setting = "domain", default = "home.local" }
 
+[[service]]
+id            = "caddy-adapter"
+name          = "Caddy adapter"
+image         = "ghcr.io/lemonfiber/caddy-adapter"
+digest        = "sha256:60c0881631d27363380ebc4a9bf94c977745823e749c5b2d9a9ab06a4d100308"
+tag           = "main-c0584aa056a8"
+criticality   = "optional"
+reaches       = ""
+asks_for      = "Nothing beyond this machine. It answers lemonfiber's proxy.front contract by loading the routes and certificates lemonfiber hands it into Caddy, beside it, through Caddy's admin socket."
+config_path   = "/config"
+listens       = 8080
+speaks        = ["proxy.front@1"]
+fronts        = "caddy"
+provides      = ["proxy.front"]
+shares_config = "/caddy"
+posture       = "confined"
+
 [[proof]]
 id      = "caddy.redirects-plain-http"
+service = "caddy"
 title   = "A household name asked for over plain HTTP is sent to HTTPS"
 fixture = "recordings/caddy/plain-http-is-redirected.json"
 why     = """
@@ -59,6 +75,7 @@ expect  = { status = 308 }
 
 [[proof]]
 id      = "caddy.version"
+service = "caddy"
 title   = "The image's own Caddy says which release it is"
 run     = { args = ["caddy", "version"] }
 expect  = { exit = 0, stdout_starts_with = "v2.11.7 " }
@@ -69,12 +86,3 @@ or another server could give as well. Run as the image's own command, Caddy
 names the release it was built from, which says the image is the Caddy this
 part is built on, at the release lemonfiber-caddy's Dockerfile pins.
 """
-
-[[claim]]
-capability = "proxy.front"
-
-[[claim.probe]]
-id      = "redirects"
-request = { method = "GET", path = "/" }
-expect  = { status = 308 }
-fixture = "recordings/caddy/proxy-front-redirects.json"
