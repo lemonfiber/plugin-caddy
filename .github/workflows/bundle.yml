@@ -1,7 +1,7 @@
 # Ask the catalogue to move this plugin's pin in the default bundle (OPS-R86).
 #
-# A train tag's run of the `image` workflow opens one rolling pull request on
-# `release/image-pin` naming the image the tag published. Once that
+# A first-party plugin's release opens one rolling pull request on
+# `release/adapter-pin` naming the adapter image its tag published. Once that
 # pull request merges, the merge commit is the revision whose manifest names
 # that image, and `bundle-bump` in lemonfiber-plugins moves the bundle's pin and
 # copy to it. It is told this repository's address, and refuses a plugin the
@@ -25,7 +25,7 @@ jobs:
   bump:
     if: >-
       github.event.pull_request.merged == true
-      && github.event.pull_request.head.ref == 'release/image-pin'
+      && github.event.pull_request.head.ref == 'release/adapter-pin'
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.repository_owner == 'lemonfiber'
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
           PY
       - name: Mint a token that can dispatch the catalogue's bump
         id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}
@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           [ "$AUTHOR" = "$BOT" ] \
-            || { echo "::error::release/image-pin was opened by ${AUTHOR}, not ${BOT}, so nothing is pinned"; exit 1; }
+            || { echo "::error::release/adapter-pin was opened by ${AUTHOR}, not ${BOT}, so nothing is pinned"; exit 1; }
           [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] \
             || { echo "::error::the merge named no commit: '${REVISION}'"; exit 1; }
           gh api --method POST \
