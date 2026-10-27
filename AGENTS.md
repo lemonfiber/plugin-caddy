@@ -24,7 +24,8 @@ says how the catalogue pins it and how lemonfiber carries it.
   files, where it has any, under `config/caddy/` (`ARCH-R271`).
 - **Every service declares `reaches` and `asks_for`** (`ARCH-R270`).
 - **No Python here.** The reader is spec's `first-party-plugin` workflow's.
-- **The image is built here** (`OPS-R90`). The `Dockerfile` builds it from
-  its upstream's, and it runs under the posture its manifest declares (`ARCH-R250`);
-  `posture/prepare`, where there is one, gives it what lemonfiber writes at
-  install. Its pin moves on the release app's rolling pull request.
+- **The image is built in `lemonfiber-caddy`** (`OPS-R93`). Its `Dockerfile` builds
+  it from its upstream's, and it runs under the posture this manifest's main
+  declares (`ARCH-R250`), with the starting files under `config/caddy/`. Its pin
+  moves here on the release app's rolling pull request from there, so a change to
+  the posture or the starting files is proved there on that repository's next run.

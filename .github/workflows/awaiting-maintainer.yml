@@ -3,13 +3,12 @@
 #   gates     gates / gates
 #   pin-only  pin-only / pin-only
 #   plugin    plugin / what changed, plugin / plugin
-#   image     image / what changed, image / posture
 #   codeql    analyze, alerts / alerts
 #   sonar     gate / gate
 name: awaiting-maintainer
 on:
   workflow_run:
-    workflows: [gates, pin-only, plugin, image, codeql, sonar]
+    workflows: [gates, pin-only, plugin, codeql, sonar]
     types: [completed]
   pull_request_review:
     types: [submitted]

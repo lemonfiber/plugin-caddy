@@ -67,7 +67,7 @@ why     = """
 Every other proof here is a status the configuration chose, which a port proxy
 or another server could give as well. Run as the image's own command, Caddy
 names the release it was built from, which says the image is the Caddy this
-part is built on, at the release its Dockerfile pins.
+part is built on, at the release lemonfiber-caddy's Dockerfile pins.
 """
 
 [[claim]]
