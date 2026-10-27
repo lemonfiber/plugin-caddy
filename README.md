@@ -17,13 +17,23 @@ with what the posture it runs under does not hold taken out. Every commit on
 that repository's main publishes it and moves the pin here on a rolling pull
 request; the release train tags this repository, and the bundle pins the tag.
 
+This repository also holds the adapter that speaks lemonfiber's `proxy.front`
+contract in front of Caddy: a Rust crate built on the core's adapter kit, into
+the image `ghcr.io/lemonfiber/caddy-adapter`, published from every commit on
+`main` and from each tag the release train cuts. It writes the routes and
+certificates the core hands it into Caddy's running configuration through
+Caddy's admin socket, in Caddy's configuration directory, which it shares, and
+reads them back to say what Caddy serves.
+
 ## What is here
 
 | Path | What it is |
 | --- | --- |
 | `plugin.toml` | The part's manifest |
 | `config/caddy/` | The files Caddy starts with, written into its configuration directory |
-| `targets.toml` | The lemonfiber its checks run against |
+| `src/` | The adapter |
+| `Dockerfile` | The adapter's image |
+| `targets.toml` | The lemonfiber its checks run against, and the core the adapter is built on |
 | `proofs.json` | What those checks said, committed |
 
 ## Checks
@@ -31,8 +41,10 @@ request; the release train tags this repository, and the bundle pins the tag.
 The plugin verdict is one job of spec's
 [`first-party-plugin`](https://github.com/lemonfiber/spec/blob/main/.github/workflows/first-party-plugin.yml)
 workflow: the manifest as the lemonfiber `targets.toml` names reads it, every
-claim against its recording, and every pinned digest. This repository holds no
-Python of its own. `just ci` runs the gates that need nothing but this tree.
+claim against its recording, and every pinned digest. The adapter is held to its
+format, its lints, its tests, full line coverage and its dependency policy, and
+its image runs as lemonfiber runs it. This repository holds no Python of its own.
+`just ci` runs the gates that need nothing but this tree.
 The image is built and run under the posture this manifest's main declares by
 spec's
 [`first-party-image`](https://github.com/lemonfiber/spec/blob/main/.github/workflows/first-party-image.yml)
@@ -40,6 +52,6 @@ workflow in lemonfiber-caddy, on each of its pull requests and from its main.
 
 ## Licence
 
-The data in this repository is under the licence in `LICENSE`.
+The code and data in this repository are under the licence in `LICENSE`.
 `caddy`, which its image is built from, is under Apache-2.0, and the
 image lemonfiber-caddy builds carries it under the same licence.
