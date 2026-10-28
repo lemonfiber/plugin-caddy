@@ -19,7 +19,7 @@ pub const UPSTREAM: &str = "Caddy";
 pub const RELEASE: &str = "v2.11.7";
 
 /// The digest of the image that release's recordings were taken from.
-pub const DIGEST: &str = "sha256:4a6ccb3755269ed3a58ec0967f5f8d9bea9dc932ca376ce021f67bc7e3f12c00";
+pub const DIGEST: &str = "sha256:46c69e82a029f503a44fe9d40467e6ba3c59fd8a80e049550fa4655ccb63ce16";
 
 /// What this adapter says it is: the contract it speaks and the release it supports.
 #[must_use]

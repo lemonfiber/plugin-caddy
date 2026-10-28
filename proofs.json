@@ -1,5 +1,5 @@
 {
-  "lemonfiber": "bbfb55df73673195599f643e7cbfab94745f2e9f",
+  "lemonfiber": "fdc71e22778e452a697b4a1026e33c9b779066e1",
   "against": "recordings",
   "proofs": [
     {
@@ -11,12 +11,6 @@
     {
       "id": "caddy.version",
       "kind": "proof",
-      "outcome": "passed",
-      "detail": ""
-    },
-    {
-      "id": "proxy.front/redirects",
-      "kind": "probe",
       "outcome": "passed",
       "detail": ""
     }

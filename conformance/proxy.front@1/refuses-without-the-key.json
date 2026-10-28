@@ -1,0 +1,6 @@
+{
+  "recorded_from": "ghcr.io/lemonfiber/caddy@sha256:46c69e82a029f503a44fe9d40467e6ba3c59fd8a80e049550fa4655ccb63ce16",
+  "note": "Asked without the plugin's key: the kit refuses it before the adapter is reached.",
+  "request": {"method": "POST", "path": "/lemonfiber/proxy.front/v1/apply", "accept": "application/json"},
+  "response": {"status": 401}
+}

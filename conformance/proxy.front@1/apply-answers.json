@@ -1,0 +1,10 @@
+{
+  "recorded_from": "ghcr.io/lemonfiber/caddy@sha256:46c69e82a029f503a44fe9d40467e6ba3c59fd8a80e049550fa4655ccb63ce16",
+  "note": "The case's routes and certificates loaded into Caddy through its admin socket, and read back as loaded.",
+  "request": {"method": "POST", "path": "/lemonfiber/proxy.front/v1/apply", "accept": "application/json"},
+  "response": {
+    "status": 200,
+    "headers": {"content-type": "application/json"},
+    "body_starts_with": "null"
+  }
+}
