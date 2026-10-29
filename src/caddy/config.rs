@@ -1,87 +1,171 @@
-//! A routing table as the Caddyfile Caddy reads when it starts.
+//! A routing table as the JSON configuration Caddy reads when it starts, and every value
+//! of the table held to a strict grammar before anything is written.
 //!
-//! Every name is one site of the household's, handed to the service behind it, under
-//! a global block that keeps Caddy's admin API off: nothing reaches Caddy's running
+//! Every value in the table comes from a `proxy.front@1` request, so from any plugin's
+//! routes. Each is refused unless it is a plain name, an address or a file name of the
+//! shapes below, before anything is written, and what is written is JSON that serde
+//! quotes, so no value can carry a directive, a placeholder or a block of its own. Caddy's
+//! admin API is off in every configuration written: nothing reaches its running
 //! configuration, and what it serves is what this file says once it starts.
 
+use std::net::Ipv4Addr;
+
 use lemonfiber_ports::service::{Route, Routing, Tls};
+use serde_json::{json, Value};
 
 /// Where Caddy's configuration directory is mounted inside its own container.
 pub const CADDY_CONFIGURATION: &str = "/etc/caddy";
 
-/// The port Caddy answers plain HTTP on inside its container.
+/// The port Caddy answers plain HTTP on inside its container, which it redirects.
 pub const HTTP_PORT: u16 = 8080;
 
 /// The port Caddy answers HTTPS on inside its container.
 pub const HTTPS_PORT: u16 = 8443;
 
-/// The first line of every Caddyfile this adapter writes.
-pub const WRITTEN: &str = "# Written by caddy-adapter from lemonfiber's routing table.";
+/// The files beneath the configuration directory that are the adapter's own, which a
+/// certificate may never be read from.
+pub const OWN: [&str; 2] = ["caddy.json", "routing.json"];
+
+/// The one server every route is a route of.
+const SERVER: &str = "lemonfiber";
+
+/// The longest name DNS carries.
+const LONGEST_NAME: usize = 253;
+
+/// The longest label DNS carries.
+const LONGEST_LABEL: usize = 63;
+
+/// The most segments a certificate's file is named by.
+const DEEPEST_FILE: usize = 4;
+
+/// The longest segment of a certificate's file name.
+const LONGEST_SEGMENT: usize = 64;
 
 /// Why a table was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
-    /// A certificate or key named a file outside the proxy's configuration directory.
+    /// A certificate or key that is not a plain file beneath the configuration directory.
     Outside(String),
-    /// A name or a host that is not one word of letters, digits, dots and hyphens.
+    /// A name that is not a DNS name of letters, digits and hyphens, or one with `*.`.
     Unnamed(String),
+    /// A host that is not a DNS name or an IPv4 address.
+    Unhosted(String),
+    /// A port that no service answers on.
+    Unported(u16),
 }
 
-/// The Caddyfile that serves `table`.
+/// The configuration Caddy loads to serve `table`, every value of it held to its
+/// grammar first.
 ///
 /// # Errors
 ///
-/// [`Refused`] where a certificate's file lies outside the proxy's configuration
-/// directory, or a name or host is not a plain DNS name.
-pub fn rendered(table: &Routing) -> Result<String, Refused> {
-    let tls = match &table.tls {
-        Tls::Automatic => None,
-        Tls::Files { certificate, key } => Some(format!(
-            "\ttls {} {}\n",
-            beneath(certificate)?,
-            beneath(key)?
-        )),
-    };
-    let mut text = format!(
-        "{WRITTEN}\n\n{{\n\tadmin off\n\tpersist_config off\n\thttp_port {HTTP_PORT}\n\thttps_port {HTTPS_PORT}\n}}\n"
+/// [`Refused`] naming the first value that is not of its grammar.
+pub fn rendered(table: &Routing) -> Result<Value, Refused> {
+    let routes = table
+        .routes
+        .iter()
+        .map(route)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut server = json!({
+        "listen": [format!(":{HTTPS_PORT}")],
+        "routes": routes,
+    });
+    let mut apps = serde_json::Map::new();
+    if let Tls::Files { certificate, key } = &table.tls {
+        let files = json!([{
+            "certificate": beneath(certificate)?,
+            "key": beneath(key)?,
+        }]);
+        apps.insert(
+            "tls".to_owned(),
+            json!({ "certificates": { "load_files": files } }),
+        );
+        if let Some(fields) = server.as_object_mut() {
+            fields.insert(
+                "automatic_https".to_owned(),
+                json!({ "disable_certificates": true }),
+            );
+        }
+    }
+    apps.insert(
+        "http".to_owned(),
+        json!({
+            "http_port": HTTP_PORT,
+            "https_port": HTTPS_PORT,
+            "servers": { SERVER: server },
+        }),
     );
-    for route in &table.routes {
-        text.push_str(&site(route, tls.as_deref())?);
+    Ok(json!({
+        "admin": { "disabled": true },
+        "apps": apps,
+    }))
+}
+
+/// One route of the table, as a route of the server.
+fn route(route: &Route) -> Result<Value, Refused> {
+    if route.port == 0 {
+        return Err(Refused::Unported(route.port));
     }
-    Ok(text)
+    let name = named(&route.name).ok_or_else(|| Refused::Unnamed(route.name.clone()))?;
+    let host = hosted(&route.host).ok_or_else(|| Refused::Unhosted(route.host.clone()))?;
+    Ok(json!({
+        "match": [{ "host": [name] }],
+        "handle": [{
+            "handler": "reverse_proxy",
+            "upstreams": [{ "dial": format!("{host}:{}", route.port) }],
+        }],
+        "terminal": true,
+    }))
 }
 
-/// One route of the table, as a site of the Caddyfile.
-fn site(route: &Route, tls: Option<&str>) -> Result<String, Refused> {
-    Ok(format!(
-        "\n{} {{\n{}\treverse_proxy {}:{}\n}}\n",
-        named(&route.name)?,
-        tls.unwrap_or_default(),
-        named(&route.host)?,
-        route.port
-    ))
+/// `name`, where it is a DNS name of letters, digits and hyphens, optionally under `*.`.
+fn named(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix("*.").unwrap_or(name);
+    dns(rest).then_some(name)
 }
 
-/// `name`, where it is a plain DNS name.
-fn named(name: &str) -> Result<&str, Refused> {
-    let plain = !name.is_empty()
-        && !name.starts_with(['.', '-'])
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-');
-    if plain {
-        Ok(name)
-    } else {
-        Err(Refused::Unnamed(name.to_owned()))
-    }
+/// `host`, where it is a DNS name of letters, digits and hyphens, or an IPv4 address.
+fn hosted(host: &str) -> Option<&str> {
+    (dns(host) || host.parse::<Ipv4Addr>().is_ok()).then_some(host)
 }
 
-/// `file` beneath the proxy's configuration directory, as Caddy names it.
+/// Whether `name` is a DNS name: labels of letters, digits and hyphens, each 1 to 63
+/// long and neither beginning nor ending with a hyphen, the last not all digits, at most
+/// 253 in all.
+fn dns(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= LONGEST_NAME
+        && !name
+            .rsplit('.')
+            .next()
+            .is_some_and(|last| last.bytes().all(|byte| byte.is_ascii_digit()))
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= LONGEST_LABEL
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+/// `file` beneath the proxy's configuration directory, as Caddy names it: segments of
+/// letters, digits, `.`, `_` and `-`, none beginning with `.`, and never one of the
+/// adapter's own files.
 fn beneath(file: &str) -> Result<String, Refused> {
+    let segments: Vec<&str> = file.split('/').collect();
     let plain = !file.is_empty()
-        && file
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..");
+        && segments.len() <= DEEPEST_FILE
+        && segments.iter().all(|segment| {
+            !segment.is_empty()
+                && segment.len() <= LONGEST_SEGMENT
+                && !segment.starts_with('.')
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+        && !OWN.contains(&file);
     if plain {
         Ok(format!("{CADDY_CONFIGURATION}/{file}"))
     } else {

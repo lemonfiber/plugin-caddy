@@ -100,7 +100,7 @@ async fn it_is_ready_while_caddys_configuration_directory_is_there() {
 }
 
 #[tokio::test]
-async fn a_table_applied_over_the_contract_is_written_as_the_caddyfile() {
+async fn a_table_applied_over_the_contract_is_written_as_caddys_configuration() {
     let directory = Directory::new("apply");
     assert!(std::fs::create_dir_all(&directory.0).is_ok());
     let caddy = Arc::new(Caddy::at(&directory.0));
@@ -118,8 +118,16 @@ async fn a_table_applied_over_the_contract_is_written_as_the_caddyfile() {
     .await;
 
     assert!(status.is_success(), "{status}");
-    let written =
-        std::fs::read_to_string(directory.0.join(crate::caddy::CADDYFILE)).unwrap_or_default();
-    assert!(written.contains("watch.home.example {\n\treverse_proxy door:8096\n}"));
-    assert!(written.contains("\tadmin off\n"));
+    let written: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(directory.0.join(crate::caddy::CONFIGURATION)).unwrap_or_default(),
+    )
+    .unwrap_or_default();
+    assert_eq!(
+        written.pointer("/apps/http/servers/lemonfiber/routes/0/match/0/host"),
+        Some(&json!(["watch.home.example"]))
+    );
+    assert_eq!(
+        written.pointer("/admin"),
+        Some(&json!({ "disabled": true }))
+    );
 }

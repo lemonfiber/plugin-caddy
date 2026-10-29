@@ -74,11 +74,14 @@ fn caddy_reads_its_configuration_and_writes_none_of_it() {
 }
 
 #[test]
-fn caddys_admin_api_is_off_in_every_caddyfile_it_can_start_from() {
-    let starting = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/config/caddy/Caddyfile"
-    ))
+fn caddys_admin_api_is_off_in_every_configuration_it_can_start_from() {
+    let starting: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/config/caddy/caddy.json"
+        ))
+        .unwrap_or_default(),
+    )
     .unwrap_or_default();
     let written = caddy_adapter::caddy::config::rendered(&lemonfiber_ports::service::Routing {
         tls: lemonfiber_ports::service::Tls::Automatic,
@@ -86,12 +89,20 @@ fn caddys_admin_api_is_off_in_every_caddyfile_it_can_start_from() {
     })
     .unwrap_or_default();
 
-    for caddyfile in [starting, written] {
-        let admin: Vec<&str> = caddyfile
-            .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("admin"))
-            .collect();
-        assert_eq!(admin, ["admin off"], "{caddyfile}");
+    for configuration in [starting, written] {
+        assert_eq!(
+            configuration.get("admin"),
+            Some(&serde_json::json!({ "disabled": true })),
+            "{configuration}"
+        );
     }
+}
+
+#[test]
+fn caddy_starts_from_no_caddyfile() {
+    assert!(!std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/config/caddy/Caddyfile"
+    ))
+    .exists());
 }

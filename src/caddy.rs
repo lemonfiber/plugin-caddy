@@ -1,8 +1,8 @@
-//! Caddy, told the routing table it serves by the files it reads when it starts.
+//! Caddy, told the routing table it serves by the configuration it reads when it starts.
 //!
-//! The adapter writes Caddy's Caddyfile, and the table it was written from beside it,
-//! into Caddy's configuration directory, which it shares and Caddy only reads. Caddy
-//! takes a table once it starts again, which the core does when told so.
+//! The adapter writes Caddy's JSON configuration, and the table it was written from
+//! beside it, into Caddy's configuration directory, which it shares and Caddy only
+//! reads. Caddy takes a table once it starts again, which the core does when told so.
 
 pub mod config;
 
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use lemonfiber_ports::service::{Failure, Proxying, Routing, Tls};
+use serde_json::Value;
 
 use self::config::Refused;
 
@@ -17,9 +18,9 @@ use self::config::Refused;
 const SERVICE: &str = "Caddy";
 
 /// The file Caddy reads its configuration from, in its configuration directory.
-pub const CADDYFILE: &str = "Caddyfile";
+pub const CONFIGURATION: &str = "caddy.json";
 
-/// The table the Caddyfile was written from, beside it.
+/// The table the configuration was written from, beside it.
 pub const TABLE: &str = "routing.json";
 
 /// One Caddy, told what to serve through its configuration directory.
@@ -66,22 +67,25 @@ impl Caddy {
             .map_err(|_| unavailable())
     }
 
-    /// The Caddyfile in Caddy's configuration directory.
-    async fn caddyfile(&self) -> Result<String, Failure> {
-        tokio::fs::read_to_string(self.directory.join(CADDYFILE))
+    /// The configuration in Caddy's configuration directory.
+    async fn configuration(&self) -> Result<Value, Failure> {
+        let bytes = tokio::fs::read(self.directory.join(CONFIGURATION))
             .await
-            .map_err(|_| unavailable())
+            .map_err(|_| unavailable())?;
+        serde_json::from_slice(&bytes).map_err(|_| refused("its configuration could not be read"))
     }
 }
 
 #[async_trait]
 impl Proxying for Caddy {
     async fn apply(&self, table: &Routing) -> Result<(), Failure> {
-        let caddyfile = config::rendered(table).map_err(|why| refused(&said(&why)))?;
+        let configuration = config::rendered(table).map_err(|why| refused(&said(&why)))?;
         let written =
             serde_json::to_vec(table).map_err(|_| refused("the table could not be written"))?;
+        let configured = serde_json::to_vec_pretty(&configuration)
+            .map_err(|_| refused("the configuration could not be written"))?;
         self.put(TABLE, &written).await?;
-        self.put(CADDYFILE, caddyfile.as_bytes()).await?;
+        self.put(CONFIGURATION, &configured).await?;
         if &self.routing().await? == table {
             Ok(())
         } else {
@@ -97,11 +101,11 @@ impl Proxying for Caddy {
             });
         };
         let rendered = config::rendered(&table).map_err(|why| refused(&said(&why)))?;
-        if self.caddyfile().await? == rendered {
+        if self.configuration().await? == rendered {
             Ok(table)
         } else {
             Err(refused(
-                "its Caddyfile is not the one written from the table",
+                "its configuration is not the one written from the table",
             ))
         }
     }
@@ -115,9 +119,11 @@ impl Proxying for Caddy {
 fn said(why: &Refused) -> String {
     match why {
         Refused::Outside(file) => {
-            format!("{file} is not a file beneath the proxy's configuration directory")
+            format!("{file:?} is not a plain file beneath the proxy's configuration directory")
         }
-        Refused::Unnamed(name) => format!("{name} is not a plain name"),
+        Refused::Unnamed(name) => format!("{name:?} is not a plain DNS name"),
+        Refused::Unhosted(host) => format!("{host:?} is not a DNS name or an IPv4 address"),
+        Refused::Unported(port) => format!("{port} is not a port a service answers on"),
     }
 }
 
