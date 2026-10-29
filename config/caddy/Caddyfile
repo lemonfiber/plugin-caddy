@@ -30,11 +30,13 @@
 # certificate-expiry notices from the CA, add `email you@example.com` to the
 # block below.
 
-# The adapter in front of Caddy reaches its admin API at this socket alone, in the
-# configuration directory the two share, readable and writable by their user only.
+# Caddy reads this directory and writes nothing to it. Its admin API is off, so
+# nothing reaches its running configuration: the adapter in front of it writes this
+# file from lemonfiber's routing table, and Caddy serves it once it starts again.
 
 {
-	admin unix//etc/caddy/admin.sock|0600
+	admin off
+	persist_config off
 	http_port 8080
 	https_port 8443
 }

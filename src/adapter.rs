@@ -8,9 +8,9 @@ use lemonfiber_contract::capabilities::proxy;
 
 use crate::caddy::Caddy;
 
-/// Where Caddy's admin socket is, in the adapter's container: Caddy's configuration
-/// directory, which the adapter shares.
-pub const ADDRESS: &str = "/caddy/admin.sock";
+/// Where Caddy's configuration directory is, in the adapter's container, which the
+/// adapter shares and Caddy only reads.
+pub const ADDRESS: &str = "/caddy";
 
 /// The upstream this adapter fronts, as its project names itself.
 pub const UPSTREAM: &str = "Caddy";
@@ -37,7 +37,8 @@ pub fn about() -> About {
     }
 }
 
-/// The contract, served from `caddy` under `key`, ready while Caddy answers its admin API.
+/// The contract, served from `caddy` under `key`, ready while Caddy's configuration
+/// directory is there to write.
 #[must_use]
 pub fn kit(key: String, caddy: Arc<Caddy>) -> Kit {
     let asked = Arc::clone(&caddy);

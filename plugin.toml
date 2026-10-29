@@ -27,6 +27,7 @@ asks_for    = "Nothing. It answers names on this machine and forwards to the ser
 replaces    = "caddy"
 user_mode   = "uid"
 config_path = "/etc/caddy"
+config_ro   = true
 
 [[service.publish]]
 port    = 443
@@ -51,7 +52,7 @@ digest        = "sha256:97dfeb3ecae8a171b4bcbd69edd5e6bec63ac75ad06d1be12387390c
 tag           = "main-f588e5842708"
 criticality   = "optional"
 reaches       = ""
-asks_for      = "Nothing beyond this machine. It answers lemonfiber's proxy.front contract by loading the routes and certificates lemonfiber hands it into Caddy, beside it, through Caddy's admin socket."
+asks_for      = "Nothing beyond this machine. It answers lemonfiber's proxy.front contract by writing the routes lemonfiber hands it into the Caddyfile Caddy, beside it, reads when it starts."
 config_path   = "/config"
 listens       = 8080
 speaks        = ["proxy.front@1"]

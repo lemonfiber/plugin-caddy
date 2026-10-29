@@ -106,9 +106,6 @@ version = "0.18.0"
 dependencies = [
  "async-trait",
  "axum",
- "http-body-util",
- "hyper",
- "hyper-util",
  "lemonfiber-adapter-kit",
  "lemonfiber-contract",
  "lemonfiber-plugin",

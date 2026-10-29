@@ -1,109 +1,113 @@
-//! Caddy, told the routing table it serves through its admin API.
+//! Caddy, told the routing table it serves by the files it reads when it starts.
+//!
+//! The adapter writes Caddy's Caddyfile, and the table it was written from beside it,
+//! into Caddy's configuration directory, which it shares and Caddy only reads. Caddy
+//! takes a table once it starts again, which the core does when told so.
 
-pub mod admin;
 pub mod config;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use lemonfiber_ports::service::{Failure, Proxying, Routing};
-use serde_json::Value;
+use lemonfiber_ports::service::{Failure, Proxying, Routing, Tls};
 
-use self::admin::{Admin, Answer, Call, Unanswered};
 use self::config::Refused;
 
 /// What a failure names Caddy as.
 const SERVICE: &str = "Caddy";
 
-/// Where the configuration Caddy runs is read and a new one loaded.
-const CONFIG: &str = "/config/";
+/// The file Caddy reads its configuration from, in its configuration directory.
+pub const CADDYFILE: &str = "Caddyfile";
 
-/// Where Caddy loads a configuration in place of the one it runs.
-const LOAD: &str = "/load";
+/// The table the Caddyfile was written from, beside it.
+pub const TABLE: &str = "routing.json";
 
-/// One Caddy, asked through the admin API at its socket.
+/// One Caddy, told what to serve through its configuration directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caddy {
-    admin: Admin,
+    directory: PathBuf,
 }
 
 impl Caddy {
-    /// The Caddy whose admin API listens at `socket`.
+    /// The Caddy whose configuration directory is shared at `directory`.
     #[must_use]
-    pub fn at(socket: &Path) -> Self {
+    pub fn at(directory: &Path) -> Self {
         Self {
-            admin: Admin::at(socket),
+            directory: directory.to_path_buf(),
         }
     }
 
-    /// Whether Caddy answers its admin API.
+    /// Whether Caddy's configuration directory is there to write.
     pub async fn answers(&self) -> bool {
-        self.running().await.is_ok()
+        tokio::fs::metadata(&self.directory)
+            .await
+            .is_ok_and(|held| held.is_dir())
     }
 
-    /// The configuration Caddy runs.
-    async fn running(&self) -> Result<Value, Failure> {
-        let answer = self
-            .asked(Call {
-                method: "GET",
-                path: CONFIG,
-                json: None,
-                again: false,
-            })
-            .await?;
-        serde_json::from_slice(&answer.body)
-            .map_err(|_| refused("its configuration could not be read"))
-    }
-
-    /// Load `config` in place of the configuration Caddy runs, `again` where it is the
-    /// same one.
-    async fn load(&self, config: &Value, again: bool) -> Result<(), Failure> {
-        self.asked(Call {
-            method: "POST",
-            path: LOAD,
-            json: Some(config.to_string().into_bytes()),
-            again,
-        })
-        .await
-        .map(|_| ())
-    }
-
-    /// Ask `call`, and Caddy's answer where it took it.
-    async fn asked(&self, call: Call<'_>) -> Result<Answer, Failure> {
-        let answer = self.admin.ask(call).await.map_err(|why| match why {
-            Unanswered::Unreachable | Unanswered::Slow => Failure::Unavailable {
-                service: SERVICE.to_owned(),
-            },
-            Unanswered::Unreadable => refused("its answer could not be read"),
-        })?;
-        if answer.succeeded() {
-            Ok(answer)
-        } else {
-            Err(refused(&format!("it answered {}", answer.status)))
+    /// The table last written, or none where nothing was.
+    async fn written(&self) -> Result<Option<Routing>, Failure> {
+        match tokio::fs::read(self.directory.join(TABLE)).await {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|_| refused("the table written could not be read")),
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(unavailable()),
         }
+    }
+
+    /// Write `contents` to `file` in Caddy's configuration directory, in one step.
+    async fn put(&self, file: &str, contents: &[u8]) -> Result<(), Failure> {
+        let staged = self.directory.join(format!(".{file}.writing"));
+        tokio::fs::write(&staged, contents)
+            .await
+            .map_err(|_| unavailable())?;
+        tokio::fs::rename(&staged, self.directory.join(file))
+            .await
+            .map_err(|_| unavailable())
+    }
+
+    /// The Caddyfile in Caddy's configuration directory.
+    async fn caddyfile(&self) -> Result<String, Failure> {
+        tokio::fs::read_to_string(self.directory.join(CADDYFILE))
+            .await
+            .map_err(|_| unavailable())
     }
 }
 
 #[async_trait]
 impl Proxying for Caddy {
     async fn apply(&self, table: &Routing) -> Result<(), Failure> {
-        let config = config::loaded(table).map_err(|why| refused(&said(&why)))?;
-        self.load(&config, false).await?;
-        let served = self.routing().await?;
-        if &served == table {
+        let caddyfile = config::rendered(table).map_err(|why| refused(&said(&why)))?;
+        let written =
+            serde_json::to_vec(table).map_err(|_| refused("the table could not be written"))?;
+        self.put(TABLE, &written).await?;
+        self.put(CADDYFILE, caddyfile.as_bytes()).await?;
+        if &self.routing().await? == table {
             Ok(())
         } else {
-            Err(refused("the table loaded reads back as another"))
+            Err(refused("the table written reads back as another"))
         }
     }
 
     async fn routing(&self) -> Result<Routing, Failure> {
-        config::served(&self.running().await?).map_err(|why| refused(&said(&why)))
+        let Some(table) = self.written().await? else {
+            return Ok(Routing {
+                tls: Tls::Automatic,
+                routes: Vec::new(),
+            });
+        };
+        let rendered = config::rendered(&table).map_err(|why| refused(&said(&why)))?;
+        if self.caddyfile().await? == rendered {
+            Ok(table)
+        } else {
+            Err(refused(
+                "its Caddyfile is not the one written from the table",
+            ))
+        }
     }
 
     async fn reload(&self) -> Result<(), Failure> {
-        let running = self.running().await?;
-        self.load(&running, true).await
+        self.routing().await.map(|_| ())
     }
 }
 
@@ -114,7 +118,6 @@ fn said(why: &Refused) -> String {
             format!("{file} is not a file beneath the proxy's configuration directory")
         }
         Refused::Unnamed(name) => format!("{name} is not a plain name"),
-        Refused::Unread(what) => (*what).to_owned(),
     }
 }
 
@@ -123,6 +126,13 @@ fn refused(detail: &str) -> Failure {
     Failure::Refused {
         service: SERVICE.to_owned(),
         detail: detail.to_owned(),
+    }
+}
+
+/// Caddy's configuration directory, not there to read or write.
+fn unavailable() -> Failure {
+    Failure::Unavailable {
+        service: SERVICE.to_owned(),
     }
 }
 
