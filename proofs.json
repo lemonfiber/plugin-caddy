@@ -5,8 +5,8 @@
     {
       "id": "caddy.redirects-plain-http",
       "kind": "proof",
-      "outcome": "passed",
-      "detail": ""
+      "outcome": "unproven",
+      "detail": "recordings/caddy/plain-http-is-redirected.json: was recorded from ghcr.io/lemonfiber/caddy@sha256:46c69e82a029f503a44fe9d40467e6ba3c59fd8a80e049550fa4655ccb63ce16, and this manifest installs ghcr.io/lemonfiber/caddy@sha256:6fb83b5215f34ce6c48d81bc4b42f2ca973343b5a330c46463f470e189bbc147; a recording of another build passes while describing software nobody is installing"
     },
     {
       "id": "caddy.version",
