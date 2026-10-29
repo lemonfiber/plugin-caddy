@@ -9,6 +9,7 @@ pub mod config;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use lemonfiber_adapter_kit::shared::{Shared, SharedName, Unshared};
 use lemonfiber_ports::service::{Failure, Proxying, Routing, Tls};
 use serde_json::Value;
 
@@ -19,6 +20,9 @@ const SERVICE: &str = "Caddy";
 
 /// The file Caddy reads its configuration from, in its configuration directory.
 pub const CONFIGURATION: &str = "caddy.json";
+
+/// The mode every file is written with: Caddy reads it, and only the adapter writes it.
+const MODE: u32 = 0o644;
 
 /// The table the configuration was written from, beside it.
 pub const TABLE: &str = "routing.json";
@@ -45,33 +49,39 @@ impl Caddy {
             .is_ok_and(|held| held.is_dir())
     }
 
-    /// The table last written, or none where nothing was.
-    async fn written(&self) -> Result<Option<Routing>, Failure> {
-        match tokio::fs::read(self.directory.join(TABLE)).await {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(|_| refused("the table written could not be read")),
-            Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(_) => Err(unavailable()),
-        }
+    /// What `file` holds, or none where it is not there.
+    async fn read(&self, file: &str) -> Result<Option<Vec<u8>>, Failure> {
+        Shared::at(&self.directory)
+            .read(&SharedName::new(file).map_err(unshared)?)
+            .await
+            .map_err(unshared)
     }
 
     /// Write `contents` to `file` in Caddy's configuration directory, in one step.
-    async fn put(&self, file: &str, contents: &[u8]) -> Result<(), Failure> {
-        let staged = self.directory.join(format!(".{file}.writing"));
-        tokio::fs::write(&staged, contents)
+    async fn put(&self, file: &str, contents: Vec<u8>) -> Result<(), Failure> {
+        Shared::at(&self.directory)
+            .write(&SharedName::new(file).map_err(unshared)?, contents, MODE)
             .await
-            .map_err(|_| unavailable())?;
-        tokio::fs::rename(&staged, self.directory.join(file))
-            .await
-            .map_err(|_| unavailable())
+            .map_err(unshared)
+    }
+
+    /// The table last written, or none where nothing was.
+    async fn written(&self) -> Result<Option<Routing>, Failure> {
+        self.read(TABLE)
+            .await?
+            .map(|bytes| {
+                serde_json::from_slice(&bytes)
+                    .map_err(|_| refused("the table written could not be read"))
+            })
+            .transpose()
     }
 
     /// The configuration in Caddy's configuration directory.
     async fn configuration(&self) -> Result<Value, Failure> {
-        let bytes = tokio::fs::read(self.directory.join(CONFIGURATION))
-            .await
-            .map_err(|_| unavailable())?;
+        let bytes = self
+            .read(CONFIGURATION)
+            .await?
+            .ok_or_else(|| refused("its configuration is not there"))?;
         serde_json::from_slice(&bytes).map_err(|_| refused("its configuration could not be read"))
     }
 }
@@ -84,8 +94,8 @@ impl Proxying for Caddy {
             serde_json::to_vec(table).map_err(|_| refused("the table could not be written"))?;
         let configured = serde_json::to_vec_pretty(&configuration)
             .map_err(|_| refused("the configuration could not be written"))?;
-        self.put(TABLE, &written).await?;
-        self.put(CONFIGURATION, &configured).await?;
+        self.put(TABLE, written).await?;
+        self.put(CONFIGURATION, configured).await?;
         if &self.routing().await? == table {
             Ok(())
         } else {
@@ -136,10 +146,15 @@ fn refused(detail: &str) -> Failure {
     }
 }
 
-/// Caddy's configuration directory, not there to read or write.
-fn unavailable() -> Failure {
-    Failure::Unavailable {
-        service: SERVICE.to_owned(),
+/// A file in Caddy's configuration directory that could not be reached: a link or a
+/// file that is not plain is refused by name, and a directory that is not there to read
+/// or write leaves Caddy unavailable.
+fn unshared(why: Unshared) -> Failure {
+    match why {
+        Unshared::Failed(..) => Failure::Unavailable {
+            service: SERVICE.to_owned(),
+        },
+        refusal => refused(&refusal.to_string()),
     }
 }
 

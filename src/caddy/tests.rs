@@ -142,3 +142,51 @@ async fn a_table_that_cannot_be_read_is_refused() {
         Err(Failure::Refused { .. })
     ));
 }
+
+#[tokio::test]
+async fn a_link_planted_at_the_configuration_is_replaced_and_never_written_through() {
+    let directory = Directory::new("linked-configuration");
+    let outside = Directory::new("linked-configuration-outside");
+    let _ = std::fs::write(outside.0.join(CONFIGURATION), "theirs");
+    let _ = std::os::unix::fs::symlink(
+        outside.0.join(CONFIGURATION),
+        directory.0.join(CONFIGURATION),
+    );
+
+    assert!(caddy(&directory.0).apply(&table()).await.is_ok());
+
+    assert_eq!(outside.file(CONFIGURATION), "theirs");
+    let held = std::fs::symlink_metadata(directory.0.join(CONFIGURATION));
+    assert!(held.is_ok_and(|held| held.file_type().is_file()));
+}
+
+#[tokio::test]
+async fn a_table_that_is_a_link_or_not_a_plain_file_is_refused_naming_it() {
+    let directory = Directory::new("linked-table");
+    let outside = Directory::new("linked-table-outside");
+    let _ = std::fs::write(outside.0.join(TABLE), "{}");
+    let _ = std::os::unix::fs::symlink(outside.0.join(TABLE), directory.0.join(TABLE));
+    let unplain = Directory::new("unplain-table");
+    let _ = std::fs::create_dir_all(unplain.0.join(TABLE));
+
+    for at in [&directory, &unplain] {
+        let refused = caddy(&at.0).routing().await;
+        assert!(
+            matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains(TABLE)),
+            "{refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_table_with_no_configuration_beside_it_is_refused() {
+    let directory = Directory::new("unconfigured");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let _ = std::fs::remove_file(directory.0.join(CONFIGURATION));
+
+    assert!(matches!(
+        caddy.routing().await,
+        Err(Failure::Refused { .. })
+    ));
+}
