@@ -122,6 +122,7 @@ fn said(why: &Refused) -> String {
             format!("{file:?} is not a plain file beneath the proxy's configuration directory")
         }
         Refused::Unnamed(name) => format!("{name:?} is not a plain DNS name"),
+        Refused::Twice(name) => format!("{name:?} is the name of two routes"),
         Refused::Unhosted(host) => format!("{host:?} is not a DNS name or an IPv4 address"),
         Refused::Unported(port) => format!("{port} is not a port a service answers on"),
     }

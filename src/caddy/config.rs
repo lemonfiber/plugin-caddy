@@ -3,7 +3,9 @@
 //!
 //! Every value in the table comes from a `proxy.front@1` request, so from any plugin's
 //! routes. Each is refused unless it is a plain name, an address or a file name of the
-//! shapes below, before anything is written, and what is written is JSON that serde
+//! shapes below, and a table is refused where two routes answer on one name or a route
+//! answers on a wildcard, so no route answers for another's name, before anything is
+//! written, and what is written is JSON that serde
 //! quotes, so no value can carry a directive, a placeholder or a block of its own. Caddy's
 //! admin API is off in every configuration written: nothing reaches its running
 //! configuration, and what it serves is what this file says once it starts.
@@ -46,8 +48,12 @@ const LONGEST_SEGMENT: usize = 64;
 pub enum Refused {
     /// A certificate or key that is not a plain file beneath the configuration directory.
     Outside(String),
-    /// A name that is not a DNS name of letters, digits and hyphens, or one with `*.`.
+    /// A name that is not a DNS name of letters, digits and hyphens. A wildcard is one
+    /// too, since it would answer for names the table gives other routes.
     Unnamed(String),
+    /// A name two routes of the table answer on, which one of them would take from the
+    /// other.
+    Twice(String),
     /// A host that is not a DNS name or an IPv4 address.
     Unhosted(String),
     /// A port that no service answers on.
@@ -61,6 +67,12 @@ pub enum Refused {
 ///
 /// [`Refused`] naming the first value that is not of its grammar.
 pub fn rendered(table: &Routing) -> Result<Value, Refused> {
+    let mut seen = std::collections::BTreeSet::new();
+    for route in &table.routes {
+        if !seen.insert(route.name.to_ascii_lowercase()) {
+            return Err(Refused::Twice(route.name.clone()));
+        }
+    }
     let routes = table
         .routes
         .iter()
@@ -118,10 +130,9 @@ fn route(route: &Route) -> Result<Value, Refused> {
     }))
 }
 
-/// `name`, where it is a DNS name of letters, digits and hyphens, optionally under `*.`.
+/// `name`, where it is a DNS name of letters, digits and hyphens.
 fn named(name: &str) -> Option<&str> {
-    let rest = name.strip_prefix("*.").unwrap_or(name);
-    dns(rest).then_some(name)
+    dns(name).then_some(name)
 }
 
 /// `host`, where it is a DNS name of letters, digits and hyphens, or an IPv4 address.

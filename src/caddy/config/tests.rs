@@ -94,13 +94,84 @@ fn certificates_load_from_files_beneath_the_configuration_with_issuing_off() {
 }
 
 #[test]
-fn a_name_may_be_a_wildcard_and_a_host_an_ipv4_address() {
+fn a_host_may_be_an_ipv4_address() {
     let routing = Routing {
         tls: Tls::Automatic,
-        routes: vec![route("*.home.example", "192.0.2.7", 8096)],
+        routes: vec![route("watch.home.example", "192.0.2.7", 8096)],
     };
 
     assert!(rendered(&routing).is_ok());
+}
+
+#[test]
+fn a_name_two_routes_answer_on_is_refused_rather_than_the_last_taking_it() {
+    for second in ["watch.home.example", "WATCH.home.example"] {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![
+                route("watch.home.example", "door", 8096),
+                route(second, "elsewhere", 80),
+            ],
+        };
+        assert_eq!(rendered(&routing), Err(Refused::Twice(second.to_owned())));
+    }
+}
+
+#[test]
+fn two_names_may_reach_one_service() {
+    let routing = Routing {
+        tls: Tls::Automatic,
+        routes: vec![
+            route("watch.home.example", "door", 8096),
+            route("tv.home.example", "door", 8096),
+        ],
+    };
+
+    assert!(rendered(&routing).is_ok());
+}
+
+#[test]
+fn a_wildcard_that_would_answer_for_another_routes_name_is_refused() {
+    for wildcard in ["*.home.example", "*.example", "*"] {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![
+                route(wildcard, "elsewhere", 80),
+                route("watch.home.example", "door", 8096),
+            ],
+        };
+        assert_eq!(
+            rendered(&routing),
+            Err(Refused::Unnamed(wildcard.to_owned()))
+        );
+    }
+}
+
+#[test]
+fn every_route_answers_on_its_own_name_alone() {
+    let config = rendered(&table(Tls::Automatic)).unwrap_or_default();
+    let routes = config
+        .pointer("/apps/http/servers/lemonfiber/routes")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let hosts: Vec<serde_json::Value> = routes
+        .iter()
+        .filter_map(|route| route.pointer("/match/0/host").cloned())
+        .collect();
+    assert_eq!(
+        hosts,
+        [
+            json!(["watch.home.example"]),
+            json!(["requests.home.example"])
+        ]
+    );
+    assert!(routes.iter().all(|route| route
+        .pointer("/match")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        == Some(1)));
 }
 
 #[test]
