@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -8,7 +9,6 @@ use tower::ServiceExt as _;
 
 use super::{about, kit, DIGEST, RELEASE, UPSTREAM};
 use crate::caddy::Caddy;
-use crate::fake::{serve, Held, Socket};
 
 fn a_key() -> String {
     ('e'..='t').collect()
@@ -56,8 +56,8 @@ fn it_says_it_speaks_proxy_front_for_the_caddy_its_recordings_were_taken_from() 
 
 #[tokio::test]
 async fn it_names_itself_under_the_key_and_to_nobody_else() {
-    let socket = Socket::new("adapter-about");
-    let caddy = Arc::new(Caddy::at(&socket.0));
+    let directory = Directory::new("about");
+    let caddy = Arc::new(Caddy::at(&directory.0));
 
     let (status, body) =
         answered(Arc::clone(&caddy), "GET", &about_path(), Some(&a_key()), "").await;
@@ -68,13 +68,31 @@ async fn it_names_itself_under_the_key_and_to_nobody_else() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+/// A configuration directory of its own, removed when dropped.
+struct Directory(PathBuf);
+
+impl Directory {
+    fn new(name: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("caddy-adapter-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        Self(path)
+    }
+}
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[tokio::test]
-async fn it_is_ready_while_caddy_answers_its_admin_api() {
-    let socket = Socket::new("adapter-ready");
-    let caddy = Arc::new(Caddy::at(&socket.0));
+async fn it_is_ready_while_caddys_configuration_directory_is_there() {
+    let directory = Directory::new("ready");
+    let caddy = Arc::new(Caddy::at(&directory.0));
     let (_, before) = answered(Arc::clone(&caddy), "GET", &ready_path(), Some(&a_key()), "").await;
 
-    assert!(serve(&socket.0, Arc::new(Mutex::new(Held::default()))));
+    assert!(std::fs::create_dir_all(&directory.0).is_ok());
     let (_, after) = answered(caddy, "GET", &ready_path(), Some(&a_key()), "").await;
 
     assert_eq!(before, b"false");
@@ -82,11 +100,10 @@ async fn it_is_ready_while_caddy_answers_its_admin_api() {
 }
 
 #[tokio::test]
-async fn a_table_applied_over_the_contract_reaches_caddy() {
-    let socket = Socket::new("adapter-apply");
-    let held = Arc::new(Mutex::new(Held::default()));
-    assert!(serve(&socket.0, Arc::clone(&held)));
-    let caddy = Arc::new(Caddy::at(&socket.0));
+async fn a_table_applied_over_the_contract_is_written_as_caddys_configuration() {
+    let directory = Directory::new("apply");
+    assert!(std::fs::create_dir_all(&directory.0).is_ok());
+    let caddy = Arc::new(Caddy::at(&directory.0));
     let table = json!({"table": {"tls": "automatic", "routes": [
         {"name": "watch.home.example", "host": "door", "port": 8096}
     ]}});
@@ -101,8 +118,16 @@ async fn a_table_applied_over_the_contract_reaches_caddy() {
     .await;
 
     assert!(status.is_success(), "{status}");
+    let written: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(directory.0.join(crate::caddy::CONFIGURATION)).unwrap_or_default(),
+    )
+    .unwrap_or_default();
     assert_eq!(
-        held.lock().map(|held| held.loads.len()).unwrap_or_default(),
-        1
+        written.pointer("/apps/http/servers/lemonfiber/routes/0/match/0/host"),
+        Some(&json!(["watch.home.example"]))
+    );
+    assert_eq!(
+        written.pointer("/admin"),
+        Some(&json!({ "disabled": true }))
     );
 }

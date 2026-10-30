@@ -1,7 +1,7 @@
 use lemonfiber_ports::service::{Route, Routing, Tls};
 use serde_json::json;
 
-use super::{loaded, served, Refused, ADMIN_LISTEN};
+use super::{rendered, Refused};
 
 fn route(name: &str, host: &str, port: u16) -> Route {
     Route {
@@ -21,134 +21,262 @@ fn table(tls: Tls) -> Routing {
     }
 }
 
-fn none() -> Routing {
-    Routing {
-        tls: Tls::Automatic,
-        routes: Vec::new(),
+fn files(certificate: &str, key: &str) -> Tls {
+    Tls::Files {
+        certificate: certificate.to_owned(),
+        key: key.to_owned(),
     }
 }
 
-#[test]
-fn a_table_reads_back_from_the_configuration_it_is_loaded_as() {
-    for tls in [
-        Tls::Automatic,
-        Tls::Files {
-            certificate: "certificates/house.crt".to_owned(),
-            key: "certificates/house.key".to_owned(),
-        },
-    ] {
-        let table = table(tls);
-        let config = loaded(&table);
-        assert!(config.is_ok());
-        let Ok(config) = config else { return };
+/// Every attempt to carry a directive, a placeholder or a block of its own through a
+/// value, each of which has to be refused before anything is written.
+const INJECTIONS: [&str; 16] = [
+    "",
+    "a b",
+    "a\nb",
+    "a\r\nb",
+    "a\tb",
+    "a}\n:80 {\n\tfile_server",
+    "a { admin localhost:2019 }",
+    "{$DOMAIN}",
+    "{env.HOME}",
+    "home.{$DOMAIN:home.local}",
+    "import /etc/passwd",
+    "# a comment",
+    "a\"b",
+    "a'b",
+    "a;b",
+    "a\u{0}b",
+];
 
-        assert_eq!(served(&config), Ok(table));
-    }
-}
-
 #[test]
-fn the_configuration_keeps_the_admin_api_on_its_socket_and_names_each_route_once() {
-    let config = loaded(&table(Tls::Automatic));
+fn every_route_is_matched_on_its_name_and_handed_to_its_service_with_admin_off() {
+    let config = rendered(&table(Tls::Automatic));
     assert!(config.is_ok());
-    let Ok(config) = config else { return };
+    let config = config.unwrap_or_default();
 
-    assert_eq!(config.pointer("/admin/listen"), Some(&json!(ADMIN_LISTEN)));
+    assert_eq!(config.pointer("/admin"), Some(&json!({ "disabled": true })));
+    let server = config.pointer("/apps/http/servers/lemonfiber");
     assert_eq!(
-        config.pointer("/apps/http/servers/lemonfiber/routes/0/match/0/host"),
+        server.and_then(|server| server.pointer("/listen")),
+        Some(&json!([":8443"]))
+    );
+    assert_eq!(
+        server.and_then(|server| server.pointer("/routes/0/match/0/host")),
         Some(&json!(["watch.home.example"]))
     );
     assert_eq!(
-        config.pointer("/apps/http/servers/lemonfiber/routes/1/handle/0/upstreams/0/dial"),
+        server.and_then(|server| server.pointer("/routes/1/handle/0/upstreams/0/dial")),
         Some(&json!("seerr:5055"))
     );
     assert_eq!(config.pointer("/apps/tls"), None);
 }
 
 #[test]
-fn files_are_loaded_from_the_proxy_configuration_directory_and_nothing_is_fetched() {
-    let config = loaded(&table(Tls::Files {
-        certificate: "house.crt".to_owned(),
-        key: "house.key".to_owned(),
-    }));
-    assert!(config.is_ok());
-    let Ok(config) = config else { return };
+fn certificates_load_from_files_beneath_the_configuration_with_issuing_off() {
+    let config = rendered(&table(files(
+        "certificates/house.crt",
+        "certificates/house.key",
+    )))
+    .unwrap_or_default();
 
     assert_eq!(
-        config.pointer("/apps/tls/certificates/load_files/0/certificate"),
-        Some(&json!("/etc/caddy/house.crt"))
+        config.pointer("/apps/tls/certificates/load_files"),
+        Some(&json!([{
+            "certificate": "/etc/caddy/certificates/house.crt",
+            "key": "/etc/caddy/certificates/house.key",
+        }]))
     );
     assert_eq!(
-        config.pointer("/apps/http/servers/lemonfiber/automatic_https/disable_certificates"),
-        Some(&json!(true))
+        config.pointer("/apps/http/servers/lemonfiber/automatic_https"),
+        Some(&json!({ "disable_certificates": true }))
     );
 }
 
 #[test]
-fn a_file_outside_the_configuration_directory_is_refused() {
-    for file in ["", "/etc/passwd", "../secrets", "a/../b", "a//b", "./a"] {
-        let refused = loaded(&table(Tls::Files {
-            certificate: file.to_owned(),
-            key: "house.key".to_owned(),
-        }));
-        assert_eq!(refused, Err(Refused::Outside(file.to_owned())), "{file:?}");
+fn a_host_may_be_an_ipv4_address() {
+    let routing = Routing {
+        tls: Tls::Automatic,
+        routes: vec![route("watch.home.example", "192.0.2.7", 8096)],
+    };
+
+    assert!(rendered(&routing).is_ok());
+}
+
+#[test]
+fn a_name_two_routes_answer_on_is_refused_rather_than_the_last_taking_it() {
+    for second in ["watch.home.example", "WATCH.home.example"] {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![
+                route("watch.home.example", "door", 8096),
+                route(second, "elsewhere", 80),
+            ],
+        };
+        assert_eq!(rendered(&routing), Err(Refused::Twice(second.to_owned())));
     }
 }
 
 #[test]
-fn a_name_or_host_that_is_not_a_plain_name_is_refused() {
-    for name in ["", "-a.example", ".a.example", "a b", "a/b", "a:80", "a\"b"] {
-        let mut named = table(Tls::Automatic);
-        named.routes = vec![route(name, "door", 8096)];
+fn two_names_may_reach_one_service() {
+    let routing = Routing {
+        tls: Tls::Automatic,
+        routes: vec![
+            route("watch.home.example", "door", 8096),
+            route("tv.home.example", "door", 8096),
+        ],
+    };
+
+    assert!(rendered(&routing).is_ok());
+}
+
+#[test]
+fn a_wildcard_that_would_answer_for_another_routes_name_is_refused() {
+    for wildcard in ["*.home.example", "*.example", "*"] {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![
+                route(wildcard, "elsewhere", 80),
+                route("watch.home.example", "door", 8096),
+            ],
+        };
         assert_eq!(
-            loaded(&named),
-            Err(Refused::Unnamed(name.to_owned())),
-            "{name:?}"
-        );
-
-        let mut hosted = table(Tls::Automatic);
-        hosted.routes = vec![route("a.example", name, 8096)];
-        assert_eq!(
-            loaded(&hosted),
-            Err(Refused::Unnamed(name.to_owned())),
-            "{name:?}"
+            rendered(&routing),
+            Err(Refused::Unnamed(wildcard.to_owned()))
         );
     }
 }
 
 #[test]
-fn a_caddy_running_no_table_serves_none() {
-    assert_eq!(served(&json!(null)), Ok(none()));
+fn every_route_answers_on_its_own_name_alone() {
+    let config = rendered(&table(Tls::Automatic)).unwrap_or_default();
+    let routes = config
+        .pointer("/apps/http/servers/lemonfiber/routes")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let hosts: Vec<serde_json::Value> = routes
+        .iter()
+        .filter_map(|route| route.pointer("/match/0/host").cloned())
+        .collect();
     assert_eq!(
-        served(&json!({"apps": {"http": {"servers": {"lemonfiber": {}}}}})),
-        Ok(none())
+        hosts,
+        [
+            json!(["watch.home.example"]),
+            json!(["requests.home.example"])
+        ]
     );
+    assert!(routes.iter().all(|route| route
+        .pointer("/match")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        == Some(1)));
 }
 
 #[test]
-fn a_configuration_in_no_shape_a_table_is_loaded_as_is_unread() {
-    for routes in [
-        json!([{}]),
-        json!([{"match": [{"host": ["a.example"]}]}]),
-        json!([{"match": [{"host": ["a.example"]}], "handle": [{"upstreams": [{"dial": "door"}]}]}]),
-        json!([{"match": [{"host": ["a.example"]}], "handle": [{"upstreams": [{"dial": "door:http"}]}]}]),
-    ] {
-        let config = json!({"apps": {"http": {"servers": {"lemonfiber": {"routes": routes}}}}});
-        assert!(
-            matches!(served(&config), Err(Refused::Unread(_))),
-            "{config}"
+fn a_name_carrying_anything_but_a_dns_name_is_refused() {
+    let mut names: Vec<String> = INJECTIONS.iter().map(|one| (*one).to_owned()).collect();
+    names.extend(
+        [
+            ".lead",
+            "trail.",
+            "-a",
+            "a-",
+            "a..b",
+            "*",
+            "a.*.b",
+            "**.a",
+            "1.2.3.4:80",
+        ]
+        .map(str::to_owned),
+    );
+    names.push("a".repeat(64));
+    names.push(format!("{}.a", "a.".repeat(127)));
+    for name in names {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![route(&name, "door", 8096)],
+        };
+        assert_eq!(rendered(&routing), Err(Refused::Unnamed(name)));
+    }
+}
+
+#[test]
+fn a_host_carrying_anything_but_a_dns_name_or_an_ipv4_address_is_refused() {
+    let mut hosts: Vec<String> = INJECTIONS.iter().map(|one| (*one).to_owned()).collect();
+    hosts.extend(["*.door", "door:80", "[::1]", "::1", "256.0.0.1", "door/x"].map(str::to_owned));
+    for host in hosts {
+        let routing = Routing {
+            tls: Tls::Automatic,
+            routes: vec![route("watch.home.example", &host, 8096)],
+        };
+        assert_eq!(rendered(&routing), Err(Refused::Unhosted(host)));
+    }
+}
+
+#[test]
+fn port_zero_is_refused() {
+    let routing = Routing {
+        tls: Tls::Automatic,
+        routes: vec![route("watch.home.example", "door", 0)],
+    };
+
+    assert_eq!(rendered(&routing), Err(Refused::Unported(0)));
+}
+
+#[test]
+fn a_certificate_that_is_not_a_plain_file_beneath_the_configuration_is_refused() {
+    let mut paths: Vec<String> = INJECTIONS.iter().map(|one| (*one).to_owned()).collect();
+    paths.extend(
+        [
+            "/etc/passwd",
+            "../key",
+            "certificates//key",
+            "./key",
+            ".hidden",
+            "a/../../b",
+            "caddy.json",
+            "routing.json",
+            "a/b/c/d/e",
+            "a{b}",
+            "a$b",
+        ]
+        .map(str::to_owned),
+    );
+    paths.push("a".repeat(65));
+    for path in paths {
+        assert_eq!(
+            rendered(&table(files(&path, "house.key"))),
+            Err(Refused::Outside(path.clone()))
+        );
+        assert_eq!(
+            rendered(&table(files("house.crt", &path))),
+            Err(Refused::Outside(path))
         );
     }
-    for files in [
-        json!({"certificate": "/elsewhere/a.crt", "key": "/etc/caddy/a.key"}),
-        json!({"certificate": "/etc/caddy/a.crt"}),
-    ] {
-        let config = json!({"apps": {
-            "http": {"servers": {"lemonfiber": {"routes": []}}},
-            "tls": {"certificates": {"load_files": [files]}},
-        }});
-        assert!(
-            matches!(served(&config), Err(Refused::Unread(_))),
-            "{config}"
-        );
+}
+
+#[test]
+fn whatever_is_accepted_holds_no_character_a_directive_or_placeholder_needs() {
+    let alphabet: Vec<char> = "ab-.*{}$ \n#\"/:_".chars().collect();
+    let mut accepted = 0;
+    for seed in 0..20_000_u32 {
+        let mut value = String::new();
+        let mut at = seed;
+        for _ in 0..6 {
+            let index = usize::try_from(at % 16).unwrap_or_default();
+            value.push(alphabet.get(index).copied().unwrap_or('a'));
+            at /= 16;
+        }
+        let routing = Routing {
+            tls: files(&value, "house.key"),
+            routes: vec![route(&value, &value, 8096)],
+        };
+        if rendered(&routing).is_ok() {
+            accepted += 1;
+            assert!(!value.contains(['{', '}', '$', ' ', '\n', '#', '"', ':', '/']));
+        }
     }
+    assert!(accepted > 0);
 }

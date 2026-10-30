@@ -106,9 +106,6 @@ version = "0.18.0"
 dependencies = [
  "async-trait",
  "axum",
- "http-body-util",
- "hyper",
- "hyper-util",
  "lemonfiber-adapter-kit",
  "lemonfiber-contract",
  "lemonfiber-plugin",
@@ -236,7 +233,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -616,7 +613,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-adapter-kit"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "async-trait",
  "axum",
@@ -625,6 +622,7 @@ dependencies = [
  "lemonfiber-error",
  "lemonfiber-ports",
  "reqwest",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",
@@ -635,7 +633,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-bundle"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "lemonfiber-manifest",
  "libc",
@@ -648,7 +646,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-bundled"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "include_dir",
  "lemonfiber-bundle",
@@ -659,7 +657,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-contract"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "async-trait",
  "lemonfiber-ports",
@@ -673,7 +671,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-error"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "schemars",
  "serde",
@@ -682,7 +680,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-manifest"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "schemars",
  "serde",
@@ -694,7 +692,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-plugin"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "lemonfiber-bundled",
  "lemonfiber-contract",
@@ -710,7 +708,7 @@ dependencies = [
 [[package]]
 name = "lemonfiber-ports"
 version = "0.17.0"
-source = "git+https://github.com/lemonfiber/lemonfiber?rev=23d16d26f54af845163ff4b004be71bca3972939#23d16d26f54af845163ff4b004be71bca3972939"
+source = "git+https://github.com/lemonfiber/lemonfiber?rev=ec332f86b6c4a0653264bb171c62f545db29c2e4#ec332f86b6c4a0653264bb171c62f545db29c2e4"
 dependencies = [
  "async-trait",
  "base64",
@@ -731,6 +729,12 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litemap"
@@ -969,6 +973,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "1.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rustls"
 version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1021,7 +1038,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1533,9 +1550,18 @@ dependencies = [
 
 [[package]]
 name = "utf8_iter"
-version = "1.0.4"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+checksum = "af3bd9d3e571c26fcce9d033b87ea5ab061b8d2ffe9b7a5675d810d68f03edf0"
+dependencies = [
+ "utf_types",
+]
+
+[[package]]
+name = "utf_types"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "version_check"
@@ -1658,7 +1684,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

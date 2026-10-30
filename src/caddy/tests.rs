@@ -1,10 +1,30 @@
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
 
-use lemonfiber_ports::service::{Failure, Proxying, Route, Routing, Tls};
-use serde_json::json;
+use lemonfiber_ports::service::{Applied, Failure, Proxying, Route, Routing, Tls};
 
-use super::Caddy;
-use crate::fake::{serve, Held, Socket};
+use super::{config, Caddy, CONFIGURATION, TABLE};
+
+/// A configuration directory of its own, removed when dropped.
+struct Directory(PathBuf);
+
+impl Directory {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("caddy-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let _ = std::fs::create_dir_all(&path);
+        Self(path)
+    }
+
+    fn file(&self, name: &str) -> String {
+        std::fs::read_to_string(self.0.join(name)).unwrap_or_default()
+    }
+}
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 fn table() -> Routing {
     Routing {
@@ -17,67 +37,81 @@ fn table() -> Routing {
     }
 }
 
-fn caddy(name: &str) -> (Socket, Arc<Mutex<Held>>, Caddy) {
-    let socket = Socket::new(name);
-    let held = Arc::new(Mutex::new(Held::default()));
-    let _ = serve(&socket.0, Arc::clone(&held));
-    let caddy = Caddy::at(&socket.0);
-    (socket, held, caddy)
+fn caddy(directory: &Path) -> Caddy {
+    Caddy::at(directory)
 }
 
 #[tokio::test]
-async fn a_table_applied_is_loaded_once_and_served() {
-    let (_socket, held, caddy) = caddy("applied");
+async fn a_table_applied_is_written_as_caddys_configuration_and_reads_back() {
+    let directory = Directory::new("applied");
+    let caddy = caddy(&directory.0);
 
-    assert!(caddy.apply(&table()).await.is_ok());
+    assert!(matches!(
+        caddy.apply(&table()).await,
+        Ok(Applied::OnRestart)
+    ));
 
-    assert_eq!(caddy.routing().await.ok(), Some(table()));
-    let loads = held
-        .lock()
-        .map(|held| held.loads.clone())
-        .unwrap_or_default();
-    assert_eq!(loads.len(), 1);
-    assert!(loads.iter().all(|(_, again)| !again));
-}
-
-#[tokio::test]
-async fn a_reload_loads_the_configuration_caddy_runs_again() {
-    let (_socket, held, caddy) = caddy("reloaded");
-    assert!(caddy.apply(&table()).await.is_ok());
-
-    assert!(caddy.reload().await.is_ok());
-
-    let loads = held
-        .lock()
-        .map(|held| held.loads.clone())
-        .unwrap_or_default();
-    assert_eq!(loads.len(), 2);
-    assert_eq!(loads.get(1).map(|(_, again)| *again), Some(true));
     assert_eq!(
-        loads.first().map(|(config, _)| config.clone()),
-        loads.get(1).map(|(config, _)| config.clone())
+        serde_json::from_str::<serde_json::Value>(&directory.file(CONFIGURATION)).ok(),
+        config::rendered(&table()).ok()
+    );
+    assert_eq!(caddy.routing().await.ok(), Some(table()));
+    assert!(!directory.file(TABLE).is_empty());
+}
+
+#[tokio::test]
+async fn nothing_written_yet_reads_as_no_route() {
+    let directory = Directory::new("unwritten");
+    let _ = std::fs::write(
+        directory.0.join(CONFIGURATION),
+        "{\"admin\": {\"disabled\": true}}",
+    );
+
+    assert_eq!(
+        caddy(&directory.0).routing().await.ok(),
+        Some(Routing {
+            tls: Tls::Automatic,
+            routes: Vec::new(),
+        })
     );
 }
 
 #[tokio::test]
-async fn a_table_that_reads_back_as_another_is_refused() {
-    let (_socket, held, caddy) = caddy("altered");
-    if let Ok(mut held) = held.lock() {
-        held.altering = true;
-    }
+async fn a_configuration_changed_by_hand_is_refused_rather_than_read() {
+    let directory = Directory::new("edited");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let _ = std::fs::write(
+        directory.0.join(CONFIGURATION),
+        "{\"admin\": {\"listen\": \"localhost:2019\"}}",
+    );
 
     assert!(matches!(
-        caddy.apply(&table()).await,
+        caddy.routing().await,
         Err(Failure::Refused { .. })
     ));
+    assert!(matches!(caddy.reload().await, Err(Failure::Refused { .. })));
 }
 
 #[tokio::test]
-async fn a_name_that_is_not_plain_is_refused_before_caddy_is_asked() {
-    let (_socket, held, caddy) = caddy("unnamed");
+async fn a_reload_reads_the_written_table_and_writes_nothing() {
+    let directory = Directory::new("reloaded");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let before = directory.file(CONFIGURATION);
+
+    assert!(matches!(caddy.reload().await, Ok(Applied::OnRestart)));
+
+    assert_eq!(directory.file(CONFIGURATION), before);
+}
+
+#[tokio::test]
+async fn a_route_carrying_a_directive_is_refused_before_anything_is_written() {
+    let directory = Directory::new("unnamed");
+    let caddy = caddy(&directory.0);
     let mut unnamed = table();
     unnamed.routes = vec![Route {
-        name: "a b".to_owned(),
+        name: "a}\n:80 {\n\tfile_server".to_owned(),
         host: "door".to_owned(),
         port: 8096,
     }];
@@ -86,92 +120,149 @@ async fn a_name_that_is_not_plain_is_refused_before_caddy_is_asked() {
         caddy.apply(&unnamed).await,
         Err(Failure::Refused { .. })
     ));
-    assert!(held.lock().is_ok_and(|held| held.loads.is_empty()));
+    assert!(directory.file(CONFIGURATION).is_empty());
+    assert!(directory.file(TABLE).is_empty());
 }
 
 #[tokio::test]
-async fn a_configuration_no_table_was_loaded_as_is_refused() {
-    let (_socket, held, caddy) = caddy("unread");
-    if let Ok(mut held) = held.lock() {
-        held.config = json!({"apps": {"http": {"servers": {"lemonfiber": {"routes": [{}]}}}}});
-    }
+async fn a_directory_that_is_not_there_is_unavailable() {
+    let caddy = caddy(Path::new("/nonexistent/caddy-configuration"));
 
-    assert!(matches!(
-        caddy.routing().await,
-        Err(Failure::Refused { .. })
-    ));
-}
-
-#[tokio::test]
-async fn an_answer_too_large_to_be_a_configuration_is_refused() {
-    let (_socket, held, caddy) = caddy("large");
-    if let Ok(mut held) = held.lock() {
-        held.config = json!("x".repeat(5 * 1024 * 1024));
-    }
-
-    assert!(matches!(
-        caddy.routing().await,
-        Err(Failure::Refused { .. })
-    ));
-}
-
-#[tokio::test]
-async fn a_table_caddy_refuses_or_one_it_would_be_handed_outside_its_directory_is_refused() {
-    let (_socket, held, caddy) = caddy("refusing");
-    let outside = Routing {
-        tls: Tls::Files {
-            certificate: "/etc/shadow".to_owned(),
-            key: "house.key".to_owned(),
-        },
-        routes: Vec::new(),
-    };
-    assert!(matches!(
-        caddy.apply(&outside).await,
-        Err(Failure::Refused { .. })
-    ));
-    assert!(held.lock().is_ok_and(|held| held.loads.is_empty()));
-
-    if let Ok(mut held) = held.lock() {
-        held.refusing = Some(400);
-    }
+    assert!(!caddy.answers().await);
     assert!(matches!(
         caddy.apply(&table()).await,
-        Err(Failure::Refused { .. })
-    ));
-    assert!(matches!(
-        caddy.routing().await,
-        Err(Failure::Refused { .. })
-    ));
-    assert!(!caddy.answers().await);
-}
-
-#[tokio::test]
-async fn a_caddy_whose_socket_answers_nothing_is_unavailable() {
-    let socket = Socket::new("silent");
-    let caddy = Caddy::at(&socket.0);
-
-    assert!(matches!(
-        caddy.routing().await,
         Err(Failure::Unavailable { .. })
     ));
-    assert!(!caddy.answers().await);
 }
 
 #[tokio::test]
-async fn an_answer_that_is_not_a_configuration_is_refused() {
-    let socket = Socket::new("garbled");
-    let Ok(listener) = std::os::unix::net::UnixListener::bind(&socket.0) else {
-        return;
-    };
-    let _ = listener.set_nonblocking(true);
-    let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
-        return;
-    };
-    let app = axum::Router::new().route("/config/", axum::routing::get(|| async { "not json" }));
-    tokio::spawn(async move { axum::serve(listener, app).await });
+async fn a_table_that_cannot_be_read_is_refused() {
+    let directory = Directory::new("unreadable");
+    let _ = std::fs::write(directory.0.join(TABLE), "not json");
 
     assert!(matches!(
-        Caddy::at(&socket.0).routing().await,
+        caddy(&directory.0).routing().await,
         Err(Failure::Refused { .. })
     ));
+}
+
+#[tokio::test]
+async fn a_link_planted_at_the_configuration_is_replaced_and_never_written_through() {
+    let directory = Directory::new("linked-configuration");
+    let outside = Directory::new("linked-configuration-outside");
+    let _ = std::fs::write(outside.0.join(CONFIGURATION), "theirs");
+    let _ = std::os::unix::fs::symlink(
+        outside.0.join(CONFIGURATION),
+        directory.0.join(CONFIGURATION),
+    );
+
+    assert!(caddy(&directory.0).apply(&table()).await.is_ok());
+
+    assert_eq!(outside.file(CONFIGURATION), "theirs");
+    let held = std::fs::symlink_metadata(directory.0.join(CONFIGURATION));
+    assert!(held.is_ok_and(|held| held.file_type().is_file()));
+}
+
+#[tokio::test]
+async fn a_table_that_is_a_link_or_not_a_plain_file_is_refused_naming_it() {
+    let directory = Directory::new("linked-table");
+    let outside = Directory::new("linked-table-outside");
+    let _ = std::fs::write(outside.0.join(TABLE), "{}");
+    let _ = std::os::unix::fs::symlink(outside.0.join(TABLE), directory.0.join(TABLE));
+    let unplain = Directory::new("unplain-table");
+    let _ = std::fs::create_dir_all(unplain.0.join(TABLE));
+
+    for at in [&directory, &unplain] {
+        let refused = caddy(&at.0).routing().await;
+        assert!(
+            matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains(TABLE)),
+            "{refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_table_with_no_configuration_beside_it_is_refused() {
+    let directory = Directory::new("unconfigured");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let _ = std::fs::remove_file(directory.0.join(CONFIGURATION));
+
+    assert!(matches!(
+        caddy.routing().await,
+        Err(Failure::Refused { .. })
+    ));
+}
+
+#[tokio::test]
+async fn every_refusal_of_a_table_says_what_it_refused() {
+    let directory = Directory::new("refusals");
+    let caddy = caddy(&directory.0);
+    let route = |name: &str, host: &str, port: u16| Route {
+        name: name.to_owned(),
+        host: host.to_owned(),
+        port,
+    };
+    let mut twice = table();
+    twice.routes.push(route("WATCH.home.example", "door", 8097));
+    let mut unhosted = table();
+    unhosted.routes = vec![route("watch.home.example", "door\n", 8096)];
+    let mut unported = table();
+    unported.routes = vec![route("watch.home.example", "door", 0)];
+    let mut outside = table();
+    outside.tls = Tls::Files {
+        certificate: "../../etc/shadow".to_owned(),
+        key: "key.pem".to_owned(),
+    };
+
+    for (asked, said) in [
+        (twice, "the name of two routes"),
+        (unhosted, "not a DNS name or an IPv4 address"),
+        (unported, "not a port a service answers on"),
+        (outside, "not a plain file beneath"),
+    ] {
+        let refused = caddy.apply(&asked).await;
+        assert!(
+            matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains(said)),
+            "{refused:?}"
+        );
+    }
+    assert!(directory.file(CONFIGURATION).is_empty());
+}
+
+#[tokio::test]
+async fn a_table_written_by_hand_that_no_configuration_could_carry_is_refused() {
+    let directory = Directory::new("handwritten");
+    let mut unnamed = table();
+    unnamed.routes = vec![Route {
+        name: "*.home.example".to_owned(),
+        host: "door".to_owned(),
+        port: 8096,
+    }];
+    let _ = std::fs::write(
+        directory.0.join(TABLE),
+        serde_json::to_vec(&unnamed).unwrap_or_default(),
+    );
+
+    let refused = caddy(&directory.0).routing().await;
+
+    assert!(
+        matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains("not a plain DNS name")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_configuration_that_is_not_json_is_refused() {
+    let directory = Directory::new("unjson");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let _ = std::fs::write(directory.0.join(CONFIGURATION), "{");
+
+    let refused = caddy.routing().await;
+
+    assert!(
+        matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains("could not be read")),
+        "{refused:?}"
+    );
 }

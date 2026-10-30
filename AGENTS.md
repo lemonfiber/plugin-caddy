@@ -38,10 +38,19 @@ says how the catalogue pins this repository and how lemonfiber carries it.
 - **No Python here.** The reader is spec's `first-party-plugin` workflow's.
 - **No `unwrap`, `expect`, `panic` or indexing** outside tests. The lints in
   `Cargo.toml` are the core's.
-- **The adapter reaches Caddy through its admin socket alone**, at
-  `/caddy/admin.sock` in the configuration directory it shares, and every
-  configuration it loads keeps that socket owner-only. A configuration Caddy
-  answers with anything other than what was loaded is refused, not served.
+- **Caddy reads `caddy.json`, a JSON configuration the adapter writes**, with
+  its admin API off and its configuration directory mounted read-only
+  (`config_ro`), so nothing a route carries is read as Caddyfile text and
+  nothing reaches Caddy while it runs. The adapter writes `caddy.json` and the
+  table it came from, `routing.json`, through
+  `lemonfiber_adapter_kit::shared`, and `apply` and `reload` answer on-restart
+  (`ARCH-R341`), so the core restarts Caddy to take a table up. A
+  configuration that is not the one rendered from the table is refused, not
+  served.
+- **Every value is held to its grammar before anything is written**: a name is
+  a DNS name, never a wildcard and never the name of two routes; a host is a DNS
+  name or an IPv4 address; a port is not zero; a certificate or key is a plain
+  file beneath the configuration directory and never Caddy's own files.
 - **The core's crates move with the train.** The `rev` in `Cargo.toml` is the
   core commit `targets.toml` names, the same for every `lemonfiber-*` crate.
 - **Moving Caddy's digest** means moving `RELEASE` and `DIGEST` in
