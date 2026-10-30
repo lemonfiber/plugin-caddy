@@ -273,13 +273,9 @@ fn whatever_is_accepted_holds_no_character_a_directive_or_placeholder_needs() {
             tls: files(&value, "house.key"),
             routes: vec![route(&value, &value, 8096)],
         };
-        if let Ok(config) = rendered(&routing) {
+        if rendered(&routing).is_ok() {
             accepted += 1;
-            let text = config.to_string();
-            assert!(
-                !value.contains(['{', '}', '$', ' ', '\n', '#', '"', ':', '/']),
-                "{value:?} reached {text}"
-            );
+            assert!(!value.contains(['{', '}', '$', ' ', '\n', '#', '"', ':', '/']));
         }
     }
     assert!(accepted > 0);

@@ -92,8 +92,7 @@ fn caddys_admin_api_is_off_in_every_configuration_it_can_start_from() {
     for configuration in [starting, written] {
         assert_eq!(
             configuration.get("admin"),
-            Some(&serde_json::json!({ "disabled": true })),
-            "{configuration}"
+            Some(&serde_json::json!({ "disabled": true }))
         );
     }
 }
