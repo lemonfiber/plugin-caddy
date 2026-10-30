@@ -2,7 +2,8 @@
 //!
 //! The adapter writes Caddy's JSON configuration, and the table it was written from
 //! beside it, into Caddy's configuration directory, which it shares and Caddy only
-//! reads. Caddy takes a table once it starts again, which the core does when told so.
+//! reads. Caddy takes a table once it starts again, so `apply` and `reload` answer that
+//! it is in force on a restart, which the core then makes.
 
 pub mod config;
 
@@ -10,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use lemonfiber_adapter_kit::shared::{Shared, SharedName, Unshared};
-use lemonfiber_ports::service::{Failure, Proxying, Routing, Tls};
+use lemonfiber_ports::service::{Applied, Failure, Proxying, Routing, Tls};
 use serde_json::Value;
 
 use self::config::Refused;
@@ -88,16 +89,17 @@ impl Caddy {
 
 #[async_trait]
 impl Proxying for Caddy {
-    async fn apply(&self, table: &Routing) -> Result<(), Failure> {
+    async fn apply(&self, table: &Routing) -> Result<Applied, Failure> {
         let configuration = config::rendered(table).map_err(|why| refused(&said(&why)))?;
-        let written =
-            serde_json::to_vec(table).map_err(|_| refused("the table could not be written"))?;
-        let configured = serde_json::to_vec_pretty(&configuration)
-            .map_err(|_| refused("the configuration could not be written"))?;
-        self.put(TABLE, written).await?;
-        self.put(CONFIGURATION, configured).await?;
+        self.put(TABLE, serde_json::to_vec(table).unwrap_or_default())
+            .await?;
+        self.put(
+            CONFIGURATION,
+            serde_json::to_vec_pretty(&configuration).unwrap_or_default(),
+        )
+        .await?;
         if &self.routing().await? == table {
-            Ok(())
+            Ok(Applied::OnRestart)
         } else {
             Err(refused("the table written reads back as another"))
         }
@@ -120,8 +122,8 @@ impl Proxying for Caddy {
         }
     }
 
-    async fn reload(&self) -> Result<(), Failure> {
-        self.routing().await.map(|_| ())
+    async fn reload(&self) -> Result<Applied, Failure> {
+        self.routing().await.map(|_| Applied::OnRestart)
     }
 }
 

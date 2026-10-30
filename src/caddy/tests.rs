@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use lemonfiber_ports::service::{Failure, Proxying, Route, Routing, Tls};
+use lemonfiber_ports::service::{Applied, Failure, Proxying, Route, Routing, Tls};
 
 use super::{config, Caddy, CONFIGURATION, TABLE};
 
@@ -46,7 +46,10 @@ async fn a_table_applied_is_written_as_caddys_configuration_and_reads_back() {
     let directory = Directory::new("applied");
     let caddy = caddy(&directory.0);
 
-    assert!(caddy.apply(&table()).await.is_ok());
+    assert!(matches!(
+        caddy.apply(&table()).await,
+        Ok(Applied::OnRestart)
+    ));
 
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&directory.file(CONFIGURATION)).ok(),
@@ -97,7 +100,7 @@ async fn a_reload_reads_the_written_table_and_writes_nothing() {
     assert!(caddy.apply(&table()).await.is_ok());
     let before = directory.file(CONFIGURATION);
 
-    assert!(caddy.reload().await.is_ok());
+    assert!(matches!(caddy.reload().await, Ok(Applied::OnRestart)));
 
     assert_eq!(directory.file(CONFIGURATION), before);
 }
@@ -189,4 +192,77 @@ async fn a_table_with_no_configuration_beside_it_is_refused() {
         caddy.routing().await,
         Err(Failure::Refused { .. })
     ));
+}
+
+#[tokio::test]
+async fn every_refusal_of_a_table_says_what_it_refused() {
+    let directory = Directory::new("refusals");
+    let caddy = caddy(&directory.0);
+    let route = |name: &str, host: &str, port: u16| Route {
+        name: name.to_owned(),
+        host: host.to_owned(),
+        port,
+    };
+    let mut twice = table();
+    twice.routes.push(route("WATCH.home.example", "door", 8097));
+    let mut unhosted = table();
+    unhosted.routes = vec![route("watch.home.example", "door\n", 8096)];
+    let mut unported = table();
+    unported.routes = vec![route("watch.home.example", "door", 0)];
+    let mut outside = table();
+    outside.tls = Tls::Files {
+        certificate: "../../etc/shadow".to_owned(),
+        key: "key.pem".to_owned(),
+    };
+
+    for (asked, said) in [
+        (twice, "the name of two routes"),
+        (unhosted, "not a DNS name or an IPv4 address"),
+        (unported, "not a port a service answers on"),
+        (outside, "not a plain file beneath"),
+    ] {
+        let refused = caddy.apply(&asked).await;
+        assert!(
+            matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains(said)),
+            "{refused:?}"
+        );
+    }
+    assert!(directory.file(CONFIGURATION).is_empty());
+}
+
+#[tokio::test]
+async fn a_table_written_by_hand_that_no_configuration_could_carry_is_refused() {
+    let directory = Directory::new("handwritten");
+    let mut unnamed = table();
+    unnamed.routes = vec![Route {
+        name: "*.home.example".to_owned(),
+        host: "door".to_owned(),
+        port: 8096,
+    }];
+    let _ = std::fs::write(
+        directory.0.join(TABLE),
+        serde_json::to_vec(&unnamed).unwrap_or_default(),
+    );
+
+    let refused = caddy(&directory.0).routing().await;
+
+    assert!(
+        matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains("not a plain DNS name")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_configuration_that_is_not_json_is_refused() {
+    let directory = Directory::new("unjson");
+    let caddy = caddy(&directory.0);
+    assert!(caddy.apply(&table()).await.is_ok());
+    let _ = std::fs::write(directory.0.join(CONFIGURATION), "{");
+
+    let refused = caddy.routing().await;
+
+    assert!(
+        matches!(&refused, Err(Failure::Refused { detail, .. }) if detail.contains("could not be read")),
+        "{refused:?}"
+    );
 }
