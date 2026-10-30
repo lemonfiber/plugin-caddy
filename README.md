@@ -21,9 +21,9 @@ This repository also holds the adapter that speaks lemonfiber's `proxy.front`
 contract in front of Caddy: a Rust crate built on the core's adapter kit, into
 the image `ghcr.io/lemonfiber/caddy-adapter`, published from every commit on
 `main` and from each tag the release train cuts. It writes the routes and
-certificates the core hands it into Caddy's running configuration through
-Caddy's admin socket, in Caddy's configuration directory, which it shares, and
-reads them back to say what Caddy serves.
+certificates the core hands it as `caddy.json` into Caddy's configuration
+directory, which it shares and Caddy only reads, and the core restarts Caddy to
+take them up. Caddy's admin API is off.
 
 ## What is here
 
