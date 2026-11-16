@@ -53,9 +53,10 @@ says how the catalogue pins this repository and how lemonfiber carries it.
   file beneath the configuration directory and never Caddy's own files.
 - **The core's crates move with the train.** The `rev` in `Cargo.toml` is the
   core commit `targets.toml` names, the same for every `lemonfiber-*` crate.
-- **Moving Caddy's digest** means moving `RELEASE` and `DIGEST` in
-  `src/adapter.rs` with it; `tests/manifest.rs` fails until they name the
-  image the manifest's `caddy` runs.
+- **Caddy's digest has one home, `plugin.toml`.** `build.rs` reads the digest of the
+  service the adapter fronts from it into `DIGEST`, so the rolling pull request
+  moving the pin moves what the adapter declares with it. Moving Caddy to another
+  release means moving `RELEASE` in `src/adapter.rs` in the same change.
 - **The image is built in `lemonfiber-caddy`** (`OPS-R93`). Its `Dockerfile` builds
   it from its upstream's, and it runs under the posture this manifest's main
   declares (`ARCH-R250`), with the starting files under `config/caddy/`. Its pin

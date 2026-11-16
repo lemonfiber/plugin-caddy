@@ -18,8 +18,7 @@ pub const UPSTREAM: &str = "Caddy";
 /// The Caddy release this adapter's recordings were taken from.
 pub const RELEASE: &str = "v2.11.7";
 
-/// The digest of the image that release's recordings were taken from.
-pub const DIGEST: &str = "sha256:6fb83b5215f34ce6c48d81bc4b42f2ca973343b5a330c46463f470e189bbc147";
+include!(concat!(env!("OUT_DIR"), "/fronted.rs"));
 
 /// What this adapter says it is: the contract it speaks and the release it supports.
 #[must_use]
